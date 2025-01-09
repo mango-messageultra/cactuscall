@@ -210,7 +210,7 @@
             const answerRef = ref(database, `rooms/${roomCode}/answers/${participantId}`);
             onValue(answerRef, async (snapshot) => {
                 const answer = snapshot.val();
-                if (answer) {
+                if (answer && peerConnection.signalingState === 'stable') {
                     console.log(`Received answer from ${participantId}`);
                     await peerConnection.setRemoteDescription(answer);
                 }
@@ -232,22 +232,6 @@
                 if (candidate) {
                     console.log(`Adding ICE candidate from ${participantId}`);
                     peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-                }
-            });
-
-            // Listen for incoming offers from other participants
-            const incomingOfferRef = ref(database, `rooms/${roomCode}/offers/${userId}`);
-            onValue(incomingOfferRef, async (snapshot) => {
-                const offer = snapshot.val();
-                if (offer && !peerConnections[participantId].currentRemoteDescription) {
-                    console.log(`Received offer from ${participantId}`);
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-
-                    // Create an answer and send it back to the offerer
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
-                    const answerRef = ref(database, `rooms/${roomCode}/answers/${participantId}`);
-                    await set(answerRef, answer);
                 }
             });
         }
