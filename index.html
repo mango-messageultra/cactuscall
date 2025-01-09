@@ -4,18 +4,64 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cactus Call</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        video {
+            width: 300px;
+            height: 200px;
+            margin: 10px;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+        }
+        #remote-videos {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 20px;
+            border: none;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        input {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Cactus Call</h1>
+    <video id="local-video" autoplay playsinline muted></video>
+    <div id="remote-videos"></div>
+    <input type="text" id="room-code" placeholder="Enter Room Code">
+    <button id="create-room">Create Room</button>
+    <button id="join-room">Join Room</button>
+
     <script type="module">
         // Import Firebase SDKs
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
-        import { getDatabase, ref, set, get } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
+        import { getDatabase, ref, set, onValue, push } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
 
-        // Firebase configuration
+        // Firebase Configuration
         const firebaseConfig = {
             apiKey: "AIzaSyCouV7muX7zFi5-XsK99nLd1PAzH739okE",
             authDomain: "cactus-call.firebaseapp.com",
-            databaseURL: "https://cactus-call-default-rtdb.firebaseio.com/",
+            databaseURL: "https://cactus-call-default-rtdb.firebaseio.com",
             projectId: "cactus-call",
-            storageBucket: "cactus-call.firebasestorage.app",
+            storageBucket: "cactus-call.appspot.com",
             messagingSenderId: "533842483928",
             appId: "1:533842483928:web:07fd76e1b5beb8154c55ad",
             measurementId: "G-8VJDZB2Z90"
@@ -25,120 +71,105 @@
         const app = initializeApp(firebaseConfig);
         const database = getDatabase(app);
 
-        // Generate a random room code
-        function generateRoomCode() {
-            return Math.random().toString(36).substring(2, 8).toUpperCase();
-        }
+        // DOM Elements
+        const localVideo = document.getElementById("local-video");
+        const remoteVideosContainer = document.getElementById("remote-videos");
+        const roomCodeInput = document.getElementById("room-code");
+        const createRoomButton = document.getElementById("create-room");
+        const joinRoomButton = document.getElementById("join-room");
 
-        // Create a new room and store it in Firebase
-        async function createRoom() {
-            const roomCode = generateRoomCode();
+        let localStream;
+        let roomCode;
+        let peerConnections = {};
+        let userId = Math.random().toString(36).substring(2, 15);
+
+        // Get Local Media
+        async function getLocalStream() {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localVideo.srcObject = localStream;
+        }
+        getLocalStream();
+
+        // Create Room
+        createRoomButton.addEventListener("click", async () => {
+            roomCode = Math.random().toString(36).substring(2, 10);
             const roomRef = ref(database, `rooms/${roomCode}`);
-            await set(roomRef, {
-                createdAt: Date.now(),
-                participants: []
-            });
+            await set(roomRef, { participants: {} });
             alert(`Room created! Share this code: ${roomCode}`);
-            return roomCode;
-        }
-
-        // Join an existing room
-        async function joinRoom(roomCode) {
-            const roomRef = ref(database, `rooms/${roomCode}`);
-            const roomSnapshot = await get(roomRef);
-
-            if (roomSnapshot.exists()) {
-                alert(`Joined room: ${roomCode}`);
-                return roomCode;
-            } else {
-                alert("Room not found. Please check the code.");
-                return null;
-            }
-        }
-
-        // Start video functionality (for local testing)
-        async function startVideo() {
-            const localVideo = document.getElementById("local-video");
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                localVideo.srcObject = stream;
-            } catch (error) {
-                console.error("Error accessing media devices:", error);
-                alert("Unable to access camera and microphone.");
-            }
-        }
-
-        // Event listeners for room controls
-        document.addEventListener("DOMContentLoaded", () => {
-            const createRoomButton = document.getElementById("create-room");
-            const joinRoomButton = document.getElementById("join-room");
-            const roomCodeInput = document.getElementById("room-code");
-
-            createRoomButton.addEventListener("click", async () => {
-                const roomCode = await createRoom();
-                if (roomCode) {
-                    startVideo(); // Start video after creating a room
-                }
-            });
-
-            joinRoomButton.addEventListener("click", async () => {
-                const roomCode = roomCodeInput.value.trim().toUpperCase();
-                if (!roomCode) {
-                    alert("Please enter a room code.");
-                    return;
-                }
-                const joinedRoom = await joinRoom(roomCode);
-                if (joinedRoom) {
-                    startVideo(); // Start video after joining a room
-                }
-            });
         });
+
+        // Join Room
+        joinRoomButton.addEventListener("click", async () => {
+            roomCode = roomCodeInput.value.trim();
+            const roomRef = ref(database, `rooms/${roomCode}/participants/${userId}`);
+            await set(roomRef, { peerConnections: {} });
+            startSignaling(roomCode);
+        });
+
+        // Start Signaling
+        function startSignaling(roomCode) {
+            const roomRef = ref(database, `rooms/${roomCode}/participants`);
+            onValue(roomRef, (snapshot) => {
+                const participants = snapshot.val();
+                Object.keys(participants).forEach((otherUserId) => {
+                    if (otherUserId !== userId && !peerConnections[otherUserId]) {
+                        createPeerConnection(otherUserId);
+                    }
+                });
+            });
+        }
+
+        // Create Peer Connection
+        function createPeerConnection(otherUserId) {
+            const peerConnection = new RTCPeerConnection();
+            peerConnections[otherUserId] = peerConnection;
+
+            // Add Local Tracks
+            localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+
+            // Handle Remote Stream
+            peerConnection.ontrack = (event) => {
+                let remoteVideo = document.createElement("video");
+                remoteVideo.srcObject = event.streams[0];
+                remoteVideo.autoplay = true;
+                remoteVideosContainer.appendChild(remoteVideo);
+            };
+
+            // Handle ICE Candidates
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    const candidateRef = ref(database, `rooms/${roomCode}/participants/${userId}/peerConnections/${otherUserId}/iceCandidates`);
+                    push(candidateRef, event.candidate.toJSON());
+                }
+            };
+
+            // Create Offer
+            peerConnection.createOffer().then((offer) => {
+                peerConnection.setLocalDescription(offer);
+                const offerRef = ref(database, `rooms/${roomCode}/participants/${userId}/peerConnections/${otherUserId}`);
+                set(offerRef, { offer });
+            });
+
+            // Listen for Answer
+            const answerRef = ref(database, `rooms/${roomCode}/participants/${otherUserId}/peerConnections/${userId}/answer`);
+            onValue(answerRef, (snapshot) => {
+                const answer = snapshot.val();
+                if (answer) {
+                    peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                }
+            });
+
+            // Listen for Remote ICE Candidates
+            const candidateRef = ref(database, `rooms/${roomCode}/participants/${otherUserId}/peerConnections/${userId}/iceCandidates`);
+            onValue(candidateRef, (snapshot) => {
+                const candidates = snapshot.val();
+                if (candidates) {
+                    Object.values(candidates).forEach((candidate) => {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    });
+                }
+            });
+        }
     </script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            background-color: #f5f5dc;
-        }
-        header {
-            background-color: #2e8b57;
-            color: white;
-            padding: 10px;
-        }
-        .controls, .room-controls {
-            margin: 20px 0;
-        }
-        button {
-            padding: 10px 20px;
-            background-color: #2e8b57;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        input {
-            padding: 10px;
-            width: 200px;
-            margin-right: 10px;
-        }
-        video {
-            width: 60%;
-            margin-top: 20px;
-            border: 2px solid #2e8b57;
-            border-radius: 10px;
-        }
-    </style>
-</head>
-<body>
-    <header>
-        <h1>Cactus Call</h1>
-    </header>
-    <div class="room-controls">
-        <button id="create-room">Create Room</button>
-        <p>OR</p>
-        <input type="text" id="room-code" placeholder="Enter Room Code">
-        <button id="join-room">Join Room</button>
-    </div>
-    <video id="local-video" autoplay playsinline muted></video>
 </body>
 </html>
