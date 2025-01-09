@@ -22,23 +22,10 @@
             justify-content: center;
             flex-wrap: wrap;
         }
-        button {
+        button, input {
             margin: 5px;
-            padding: 10px 20px;
-            border: none;
-            background-color: #4CAF50;
-            color: white;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        input {
             padding: 10px;
-            margin: 5px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
+            font-size: 16px;
         }
     </style>
 </head>
@@ -46,16 +33,15 @@
     <h1>Cactus Call</h1>
     <video id="local-video" autoplay playsinline muted></video>
     <div id="remote-videos"></div>
-    <input type="text" id="room-code" placeholder="Enter Room Code">
     <button id="create-room">Create Room</button>
     <button id="join-room">Join Room</button>
+    <input type="text" id="room-code" placeholder="Room Code">
 
     <script type="module">
-        // Import Firebase SDKs
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, push } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
 
-        // Firebase Configuration
+        // Firebase configuration
         const firebaseConfig = {
             apiKey: "AIzaSyCouV7muX7zFi5-XsK99nLd1PAzH739okE",
             authDomain: "cactus-call.firebaseapp.com",
@@ -71,17 +57,16 @@
         const app = initializeApp(firebaseConfig);
         const database = getDatabase(app);
 
-        // DOM Elements
         const localVideo = document.getElementById("local-video");
         const remoteVideosContainer = document.getElementById("remote-videos");
-        const roomCodeInput = document.getElementById("room-code");
         const createRoomButton = document.getElementById("create-room");
         const joinRoomButton = document.getElementById("join-room");
+        const roomCodeInput = document.getElementById("room-code");
 
         let localStream;
         let roomCode;
-        let peerConnections = {};
         let userId = Math.random().toString(36).substring(2, 15);
+        let peerConnections = {};
 
         // Get Local Media
         async function getLocalStream() {
@@ -95,22 +80,31 @@
             roomCode = Math.random().toString(36).substring(2, 10);
             const roomRef = ref(database, `rooms/${roomCode}`);
             await set(roomRef, { participants: {} });
-            alert(`Room created! Share this code: ${roomCode}`);
+            alert(`Room created! Code: ${roomCode}`);
+            joinRoom(roomCode);
         });
 
         // Join Room
         joinRoomButton.addEventListener("click", async () => {
             roomCode = roomCodeInput.value.trim();
-            const roomRef = ref(database, `rooms/${roomCode}/participants/${userId}`);
-            await set(roomRef, { peerConnections: {} });
-            startSignaling(roomCode);
+            if (roomCode) {
+                joinRoom(roomCode);
+            } else {
+                alert("Please enter a valid room code.");
+            }
         });
 
-        // Start Signaling
+        function joinRoom(roomCode) {
+            const participantRef = ref(database, `rooms/${roomCode}/participants/${userId}`);
+            set(participantRef, { peerConnections: {} });
+            startSignaling(roomCode);
+        }
+
         function startSignaling(roomCode) {
-            const roomRef = ref(database, `rooms/${roomCode}/participants`);
-            onValue(roomRef, (snapshot) => {
+            const participantsRef = ref(database, `rooms/${roomCode}/participants`);
+            onValue(participantsRef, (snapshot) => {
                 const participants = snapshot.val();
+                if (!participants) return;
                 Object.keys(participants).forEach((otherUserId) => {
                     if (otherUserId !== userId && !peerConnections[otherUserId]) {
                         createPeerConnection(otherUserId);
@@ -119,12 +113,11 @@
             });
         }
 
-        // Create Peer Connection
         function createPeerConnection(otherUserId) {
             const peerConnection = new RTCPeerConnection();
             peerConnections[otherUserId] = peerConnection;
 
-            // Add Local Tracks
+            // Add Local Stream Tracks
             localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
 
             // Handle Remote Stream
