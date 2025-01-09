@@ -186,7 +186,8 @@
             // Receive remote stream
             peerConnection.ontrack = (event) => {
                 console.log(`Remote stream received from ${participantId}`);
-                remoteVideo.srcObject = event.streams[0];
+                const [stream] = event.streams;
+                remoteVideo.srcObject = stream;
             };
 
             // Create an offer if the participant is the first one to connect
@@ -210,6 +211,7 @@
             // Listen for ICE candidates
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
+                    console.log(`Sending ICE candidate to ${participantId}`);
                     const candidateRef = ref(database, `rooms/${roomCode}/candidates/${participantId}`);
                     set(candidateRef, event.candidate);
                 }
