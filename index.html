@@ -185,6 +185,7 @@
 
             // Receive remote stream
             peerConnection.ontrack = (event) => {
+                console.log(`Remote stream received from ${participantId}`);
                 remoteVideo.srcObject = event.streams[0];
             };
 
@@ -201,7 +202,26 @@
             onValue(answerRef, async (snapshot) => {
                 const answer = snapshot.val();
                 if (answer) {
+                    console.log(`Received answer from ${participantId}`);
                     await peerConnection.setRemoteDescription(answer);
+                }
+            });
+
+            // Listen for ICE candidates
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    const candidateRef = ref(database, `rooms/${roomCode}/candidates/${participantId}`);
+                    set(candidateRef, event.candidate);
+                }
+            };
+
+            // Handle ICE candidates from other participants
+            const candidateRef = ref(database, `rooms/${roomCode}/candidates/${participantId}`);
+            onValue(candidateRef, (snapshot) => {
+                const candidate = snapshot.val();
+                if (candidate) {
+                    console.log(`Adding ICE candidate from ${participantId}`);
+                    peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
                 }
             });
         }
