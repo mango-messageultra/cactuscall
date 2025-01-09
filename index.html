@@ -210,9 +210,9 @@
             const answerRef = ref(database, `rooms/${roomCode}/answers/${participantId}`);
             onValue(answerRef, async (snapshot) => {
                 const answer = snapshot.val();
-                if (answer && peerConnection.signalingState === 'stable') {
+                if (answer) {
                     console.log(`Received answer from ${participantId}`);
-                    await peerConnection.setRemoteDescription(answer);
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
                 } else {
                     console.log(`Waiting for answer from ${participantId}`);
                 }
@@ -232,23 +232,11 @@
             onValue(candidateRef, (snapshot) => {
                 const candidate = snapshot.val();
                 if (candidate) {
-                    console.log(`Adding ICE candidate from ${participantId}`);
+                    console.log(`Adding ICE candidate for ${participantId}`);
                     peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
                 }
             });
         }
-
-        // Start Video Call
-        startCallButton.addEventListener("click", async () => {
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                localVideo.srcObject = localStream;
-                startCallButton.disabled = true;
-                stopCallButton.disabled = false;
-            } catch (error) {
-                feedback.textContent = "Unable to access camera and microphone.";
-            }
-        });
 
         // Stop Video Call
         stopCallButton.addEventListener("click", () => {
