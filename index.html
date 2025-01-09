@@ -98,8 +98,10 @@
         const createRoomButton = document.getElementById('create-room');
         const joinRoomButton = document.getElementById('join-room');
         const feedback = document.getElementById('feedback');
+        const videoContainer = document.getElementById('video-container');
 
         let localStream;
+        let peerConnections = {}; // Store peer connections for each participant
         let roomCode;
         let userId = Math.random().toString(36).substring(2, 15); // Random user ID
 
@@ -157,7 +159,50 @@
                 feedback.textContent = `Connected to room: ${roomCode}`;
                 console.log("Participants:", participants);
 
-                // Additional logic for WebRTC signaling would go here...
+                // Set up WebRTC connections for all participants
+                Object.keys(participants).forEach(participantId => {
+                    if (participantId !== userId) {
+                        setupPeerConnection(participantId, roomCode);
+                    }
+                });
+            });
+        }
+
+        // Set up peer-to-peer connection for each participant
+        async function setupPeerConnection(participantId, roomCode) {
+            const peerConnection = new RTCPeerConnection();
+            peerConnections[participantId] = peerConnection;
+
+            // Add local stream to peer connection
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+            // Display remote video for the new participant
+            const remoteVideo = document.createElement('video');
+            remoteVideo.id = `remote-video-${participantId}`;
+            remoteVideo.autoplay = true;
+            remoteVideo.playsinline = true;
+            videoContainer.appendChild(remoteVideo);
+
+            // Receive remote stream
+            peerConnection.ontrack = (event) => {
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            // Create an offer if the participant is the first one to connect
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+
+            // Send the offer to the other participant
+            const offerRef = ref(database, `rooms/${roomCode}/offers/${participantId}`);
+            await set(offerRef, offer);
+
+            // Listen for an answer from the other participant
+            const answerRef = ref(database, `rooms/${roomCode}/answers/${participantId}`);
+            onValue(answerRef, async (snapshot) => {
+                const answer = snapshot.val();
+                if (answer) {
+                    await peerConnection.setRemoteDescription(answer);
+                }
             });
         }
 
