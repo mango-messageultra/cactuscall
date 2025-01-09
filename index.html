@@ -33,13 +33,14 @@
     <h1>Cactus Call</h1>
     <video id="local-video" autoplay playsinline muted></video>
     <div id="remote-videos"></div>
+    <input type="text" id="room-code" placeholder="Room Code">
     <button id="create-room">Create Room</button>
     <button id="join-room">Join Room</button>
-    <input type="text" id="room-code" placeholder="Room Code">
+    <p id="feedback" style="color: red;"></p>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
-        import { getDatabase, ref, set, onValue, push } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
+        import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
 
         // Firebase configuration
         const firebaseConfig = {
@@ -62,16 +63,20 @@
         const createRoomButton = document.getElementById("create-room");
         const joinRoomButton = document.getElementById("join-room");
         const roomCodeInput = document.getElementById("room-code");
+        const feedback = document.getElementById("feedback");
 
         let localStream;
         let roomCode;
         let userId = Math.random().toString(36).substring(2, 15);
-        let peerConnections = {};
 
         // Get Local Media
         async function getLocalStream() {
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            localVideo.srcObject = localStream;
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+            } catch (error) {
+                feedback.textContent = "Error accessing camera or microphone: " + error.message;
+            }
         }
         getLocalStream();
 
@@ -79,88 +84,43 @@
         createRoomButton.addEventListener("click", async () => {
             roomCode = Math.random().toString(36).substring(2, 10);
             const roomRef = ref(database, `rooms/${roomCode}`);
-            await set(roomRef, { participants: {} });
-            alert(`Room created! Code: ${roomCode}`);
-            joinRoom(roomCode);
+            try {
+                await set(roomRef, { participants: {} });
+                feedback.textContent = `Room created! Code: ${roomCode}`;
+                roomCodeInput.value = roomCode;
+            } catch (error) {
+                feedback.textContent = "Error creating room: " + error.message;
+            }
         });
 
         // Join Room
         joinRoomButton.addEventListener("click", async () => {
             roomCode = roomCodeInput.value.trim();
-            if (roomCode) {
-                joinRoom(roomCode);
-            } else {
-                alert("Please enter a valid room code.");
+            if (!roomCode) {
+                feedback.textContent = "Please enter a valid room code.";
+                return;
+            }
+            const participantRef = ref(database, `rooms/${roomCode}/participants/${userId}`);
+            try {
+                await set(participantRef, { joinedAt: Date.now() });
+                feedback.textContent = `Joined room: ${roomCode}`;
+                startSignaling(roomCode);
+            } catch (error) {
+                feedback.textContent = "Error joining room: " + error.message;
             }
         });
 
-        function joinRoom(roomCode) {
-            const participantRef = ref(database, `rooms/${roomCode}/participants/${userId}`);
-            set(participantRef, { peerConnections: {} });
-            startSignaling(roomCode);
-        }
-
+        // Start Signaling
         function startSignaling(roomCode) {
             const participantsRef = ref(database, `rooms/${roomCode}/participants`);
             onValue(participantsRef, (snapshot) => {
                 const participants = snapshot.val();
-                if (!participants) return;
-                Object.keys(participants).forEach((otherUserId) => {
-                    if (otherUserId !== userId && !peerConnections[otherUserId]) {
-                        createPeerConnection(otherUserId);
-                    }
-                });
-            });
-        }
-
-        function createPeerConnection(otherUserId) {
-            const peerConnection = new RTCPeerConnection();
-            peerConnections[otherUserId] = peerConnection;
-
-            // Add Local Stream Tracks
-            localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
-
-            // Handle Remote Stream
-            peerConnection.ontrack = (event) => {
-                let remoteVideo = document.createElement("video");
-                remoteVideo.srcObject = event.streams[0];
-                remoteVideo.autoplay = true;
-                remoteVideosContainer.appendChild(remoteVideo);
-            };
-
-            // Handle ICE Candidates
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    const candidateRef = ref(database, `rooms/${roomCode}/participants/${userId}/peerConnections/${otherUserId}/iceCandidates`);
-                    push(candidateRef, event.candidate.toJSON());
+                if (!participants) {
+                    feedback.textContent = "Room not found or no participants.";
+                    return;
                 }
-            };
-
-            // Create Offer
-            peerConnection.createOffer().then((offer) => {
-                peerConnection.setLocalDescription(offer);
-                const offerRef = ref(database, `rooms/${roomCode}/participants/${userId}/peerConnections/${otherUserId}`);
-                set(offerRef, { offer });
-            });
-
-            // Listen for Answer
-            const answerRef = ref(database, `rooms/${roomCode}/participants/${otherUserId}/peerConnections/${userId}/answer`);
-            onValue(answerRef, (snapshot) => {
-                const answer = snapshot.val();
-                if (answer) {
-                    peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-                }
-            });
-
-            // Listen for Remote ICE Candidates
-            const candidateRef = ref(database, `rooms/${roomCode}/participants/${otherUserId}/peerConnections/${userId}/iceCandidates`);
-            onValue(candidateRef, (snapshot) => {
-                const candidates = snapshot.val();
-                if (candidates) {
-                    Object.values(candidates).forEach((candidate) => {
-                        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-                    });
-                }
+                feedback.textContent = `Connected to room: ${roomCode}`;
+                console.log("Participants:", participants);
             });
         }
     </script>
