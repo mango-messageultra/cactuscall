@@ -21,6 +21,31 @@
             color: white;
             text-align: center;
         }
+        .controls {
+            margin: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        input[type="text"] {
+            padding: 10px;
+            width: 300px;
+            border: 2px solid #2e8b57;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #2e8b57;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: gray;
+        }
         #video-container {
             display: flex;
             flex-wrap: wrap;
@@ -34,40 +59,24 @@
             width: 300px;
             height: 200px;
         }
-        .controls {
-            margin: 10px;
-        }
-        button {
-            padding: 10px 20px;
-            background-color: #2e8b57;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        button:disabled {
-            background-color: gray;
-        }
     </style>
 </head>
 <body>
     <header>
         <h1>Cactus Call</h1>
     </header>
+    <div class="controls">
+        <button id="create-room">Create Room</button>
+        <input id="room-code" type="text" placeholder="Enter Room Code">
+        <button id="join-room">Join Room</button>
+    </div>
     <div id="video-container">
         <video id="local-video" autoplay playsinline muted></video>
     </div>
-    <div class="controls">
-        <button id="create-room">Create Room</button>
-        <button id="join-room">Join Room</button>
-        <button id="start-call" disabled>Start Video</button>
-        <button id="stop-call" disabled>Stop Video</button>
-    </div>
-
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
-        import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
-        
+        import { getDatabase, ref, set, push, onValue } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
+
         const firebaseConfig = {
             apiKey: "AIzaSyCouV7muX7zFi5-XsK99nLd1PAzH739okE",
             authDomain: "cactus-call.firebaseapp.com",
@@ -78,134 +87,93 @@
             appId: "1:533842483928:web:07fd76e1b5beb8154c55ad",
             measurementId: "G-8VJDZB2Z90"
         };
-        
+
         const app = initializeApp(firebaseConfig);
-        const database = getDatabase(app);
+        const db = getDatabase(app);
 
-        const startCallButton = document.getElementById('start-call');
-        const stopCallButton = document.getElementById('stop-call');
+        const createRoomButton = document.getElementById('create-room');
+        const joinRoomButton = document.getElementById('join-room');
+        const roomCodeInput = document.getElementById('room-code');
         const localVideo = document.getElementById('local-video');
+        const videoContainer = document.getElementById('video-container');
         let localStream;
-        let roomCode;
         let peerConnections = {};
-        let participantId = `user_${Math.floor(Math.random() * 10000)}`;
 
-        document.getElementById('create-room').addEventListener('click', () => {
-            roomCode = Math.random().toString(36).substring(2, 8);
-            set(ref(database, `rooms/${roomCode}/participants/${participantId}`), {
-                joinedAt: Date.now()
-            }).then(() => {
-                alert(`Room created! Join with code: ${roomCode}`);
-                startCallButton.disabled = false;
-            }).catch((error) => {
-                console.error('Error creating room:', error);
-            });
-        });
-
-        document.getElementById('join-room').addEventListener('click', () => {
-            roomCode = prompt('Enter room code');
-            if (roomCode) {
-                const participantRef = ref(database, `rooms/${roomCode}/participants/${participantId}`);
-                set(participantRef, {
-                    joinedAt: Date.now()
-                }).then(() => {
-                    alert(`Joined room: ${roomCode}`);
-                    startCallButton.disabled = false;
-                }).catch((error) => {
-                    console.error('Error joining room:', error);
-                });
-            }
-        });
-
-        startCallButton.addEventListener('click', async () => {
+        async function startLocalStream() {
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 localVideo.srcObject = localStream;
-                startCallButton.disabled = true;
-                stopCallButton.disabled = false;
-                
-                const roomRef = ref(database, `rooms/${roomCode}`);
-                
-                onValue(ref(database, `rooms/${roomCode}/participants`), (snapshot) => {
-                    const participants = snapshot.val();
-                    for (let participant in participants) {
-                        if (participant !== participantId) {
-                            setupPeerConnection(participant);
-                        }
-                    }
-                });
             } catch (error) {
                 console.error('Error accessing media devices:', error);
                 alert('Unable to access camera and microphone.');
             }
+        }
+
+        createRoomButton.addEventListener('click', () => {
+            const roomRef = push(ref(db, 'rooms'));
+            const roomId = roomRef.key;
+            roomCodeInput.value = roomId; // Display the room code
+            set(roomRef, { createdAt: Date.now() });
+            alert(`Room created! Room Code: ${roomId}`);
         });
 
-        stopCallButton.addEventListener('click', () => {
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-                localVideo.srcObject = null;
+        joinRoomButton.addEventListener('click', async () => {
+            const roomId = roomCodeInput.value.trim();
+            if (!roomId) {
+                alert('Please enter a valid room code.');
+                return;
             }
-            startCallButton.disabled = false;
-            stopCallButton.disabled = true;
-            Object.values(peerConnections).forEach((peerConnection) => {
-                peerConnection.close();
+
+            const roomRef = ref(db, `rooms/${roomId}`);
+            onValue(roomRef, (snapshot) => {
+                if (!snapshot.exists()) {
+                    alert('Room does not exist!');
+                    return;
+                }
+                console.log('Connected to room:', roomId);
+                startCall(roomId);
             });
         });
 
-        async function setupPeerConnection(remoteParticipantId) {
-            const peerConnection = new RTCPeerConnection();
-            peerConnections[remoteParticipantId] = peerConnection;
+        function startCall(roomId) {
+            const roomRef = ref(db, `rooms/${roomId}`);
+            const localPeer = new RTCPeerConnection();
 
-            peerConnection.addEventListener('icecandidate', (event) => {
+            localStream.getTracks().forEach((track) => {
+                localPeer.addTrack(track, localStream);
+            });
+
+            localPeer.ontrack = (event) => {
+                const [remoteStream] = event.streams;
+                addRemoteVideo(remoteStream);
+            };
+
+            localPeer.onicecandidate = (event) => {
                 if (event.candidate) {
-                    console.log(`Sending ICE candidate for ${remoteParticipantId}`);
-                    set(ref(database, `rooms/${roomCode}/iceCandidates/${remoteParticipantId}`), event.candidate);
+                    push(ref(db, `rooms/${roomId}/iceCandidates`), event.candidate);
                 }
-            });
+            };
 
-            peerConnection.addEventListener('track', (event) => {
-                console.log(`Received track from ${remoteParticipantId}`);
-                const remoteVideo = document.createElement('video');
-                remoteVideo.srcObject = event.streams[0];
-                remoteVideo.autoplay = true;
-                remoteVideo.playsinline = true;
-                document.getElementById('video-container').appendChild(remoteVideo);
-            });
+            peerConnections[roomId] = localPeer;
 
-            // Add local stream tracks to peer connection
-            localStream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, localStream);
-            });
-
-            // Create and send an offer
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            console.log('Sending offer:', offer);
-            set(ref(database, `rooms/${roomCode}/offers/${remoteParticipantId}`), offer);
-
-            // Listen for an answer
-            const answerRef = ref(database, `rooms/${roomCode}/answers/${participantId}`);
-            onValue(answerRef, async (snapshot) => {
-                const answer = snapshot.val();
-                console.log('Received answer:', answer);
-                if (answer) {
-                    console.log(`Setting remote description for ${remoteParticipantId}`);
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-                } else {
-                    console.log(`Waiting for answer from ${remoteParticipantId}`);
-                }
-            });
-
-            // Listen for ICE candidates from other participants
-            const candidateRef = ref(database, `rooms/${roomCode}/iceCandidates/${remoteParticipantId}`);
-            onValue(candidateRef, (snapshot) => {
-                const candidate = snapshot.val();
-                if (candidate) {
-                    console.log(`Adding ICE candidate for ${remoteParticipantId}`);
-                    peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-                }
+            // Listen for ICE candidates from Firebase
+            onValue(ref(db, `rooms/${roomId}/iceCandidates`), (snapshot) => {
+                snapshot.forEach((childSnapshot) => {
+                    const candidate = new RTCIceCandidate(childSnapshot.val());
+                    localPeer.addIceCandidate(candidate).catch(console.error);
+                });
             });
         }
+
+        function addRemoteVideo(remoteStream) {
+            const remoteVideo = document.createElement('video');
+            remoteVideo.autoplay = true;
+            remoteVideo.playsinline = true;
+            remoteVideo.srcObject = remoteStream;
+            videoContainer.appendChild(remoteVideo);
+        }
+
+        startLocalStream();
     </script>
 </body>
 </html>
