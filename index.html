@@ -87,35 +87,36 @@
       const roomCode = roomCodeInput.value.trim();
       if (roomCode.length === 4 && !isNaN(roomCode)) {
         dbRef = ref(database, `rooms/${roomCode}`);
-        // Explicitly create the room in Firebase
-        set(dbRef, { createdAt: Date.now() }).then(() => {
-          console.log(`Room ${roomCode} created or joined.`);
-          alert(`Joined Room: ${roomCode}`);
-          callButton.disabled = false;
+        // Explicitly create the room in Firebase by using push to add the room code
+        push(ref(database, 'rooms'), { roomCode: roomCode, createdAt: Date.now() })
+          .then(() => {
+            console.log(`Room ${roomCode} created or joined.`);
+            alert(`Joined Room: ${roomCode}`);
+            callButton.disabled = false;
 
-          // Listen for messages in the room
-          onChildAdded(dbRef, (data) => {
-            const msg = JSON.parse(data.val().message);
-            const sender = data.val().sender;
-            if (sender !== yourId) {
-              if (msg.ice !== undefined) {
-                pc.addIceCandidate(new RTCIceCandidate(msg.ice));
-              } else if (msg.sdp?.type === "offer") {
-                pc.setRemoteDescription(new RTCSessionDescription(msg.sdp))
-                  .then(() => pc.createAnswer())
-                  .then((answer) => pc.setLocalDescription(answer))
-                  .then(() =>
-                    sendMessage(
-                      yourId,
-                      JSON.stringify({ sdp: pc.localDescription })
-                    )
-                  );
-              } else if (msg.sdp?.type === "answer") {
-                pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+            // Listen for messages in the room
+            onChildAdded(dbRef, (data) => {
+              const msg = JSON.parse(data.val().message);
+              const sender = data.val().sender;
+              if (sender !== yourId) {
+                if (msg.ice !== undefined) {
+                  pc.addIceCandidate(new RTCIceCandidate(msg.ice));
+                } else if (msg.sdp?.type === "offer") {
+                  pc.setRemoteDescription(new RTCSessionDescription(msg.sdp))
+                    .then(() => pc.createAnswer())
+                    .then((answer) => pc.setLocalDescription(answer))
+                    .then(() =>
+                      sendMessage(
+                        yourId,
+                        JSON.stringify({ sdp: pc.localDescription })
+                      )
+                    );
+                } else if (msg.sdp?.type === "answer") {
+                  pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                }
               }
-            }
+            });
           });
-        });
       } else {
         alert("Please enter a valid 4-digit room code.");
       }
