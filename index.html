@@ -1,179 +1,114 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cactus Call</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            background-color: #f5f5dc; /* Cactus-inspired light beige */
-        }
-        header {
-            width: 100%;
-            padding: 10px;
-            background-color: #2e8b57; /* Green for cactus vibe */
-            color: white;
-            text-align: center;
-        }
-        .controls {
-            margin: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-        }
-        input[type="text"] {
-            padding: 10px;
-            width: 300px;
-            border: 2px solid #2e8b57;
-            border-radius: 5px;
-            font-size: 16px;
-        }
-        button {
-            padding: 10px 20px;
-            background-color: #2e8b57;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        button:disabled {
-            background-color: gray;
-        }
-        #video-container {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 10px;
-            margin: 20px 0;
-        }
-        video {
-            border: 2px solid #2e8b57;
-            border-radius: 10px;
-            width: 300px;
-            height: 200px;
-        }
-    </style>
-</head>
-<body>
-    <header>
-        <h1>Cactus Call</h1>
-    </header>
-    <div class="controls">
-        <button id="create-room">Create Room</button>
-        <input id="room-code" type="text" placeholder="Enter Room Code">
-        <button id="join-room">Join Room</button>
-    </div>
-    <div id="video-container">
-        <video id="local-video" autoplay playsinline muted></video>
-    </div>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body onload="showMyFace()">
+    <video id="yourVideo" autoplay muted playsinline></video>
+    <video id="friendsVideo" autoplay playsinline></video>
+    <br />
+    <button
+      onclick="showFriendsFace()"
+      type="button"
+      class="btn btn-primary btn-lg"
+    >
+      <span
+        class="glyphicon glyphicon-facetime-video"
+        aria-hidden="true"
+      ></span>
+      Call
+    </button>
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
-        import { getDatabase, ref, set, push, onValue } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
+      // Import the functions you need from Firebase SDKs
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
+      import { getDatabase, ref, push, onChildAdded, remove } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyCouV7muX7zFi5-XsK99nLd1PAzH739okE",
-            authDomain: "cactus-call.firebaseapp.com",
-            databaseURL: "https://cactus-call.firebaseio.com",
-            projectId: "cactus-call",
-            storageBucket: "cactus-call.firebasestorage.app",
-            messagingSenderId: "533842483928",
-            appId: "1:533842483928:web:07fd76e1b5beb8154c55ad",
-            measurementId: "G-8VJDZB2Z90"
-        };
+      // Your web app's Firebase configuration
+      const firebaseConfig = {
+        apiKey: "AIzaSyCouV7muX7zFi5-XsK99nLd1PAzH739okE",
+        authDomain: "cactus-call.firebaseapp.com",
+        projectId: "cactus-call",
+        storageBucket: "cactus-call.appspot.com",
+        messagingSenderId: "533842483928",
+        appId: "1:533842483928:web:07fd76e1b5beb8154c55ad",
+        measurementId: "G-8VJDZB2Z90",
+      };
 
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app);
+      // Initialize Firebase
+      const app = initializeApp(firebaseConfig);
+      const database = getDatabase(app);
+      const dbRef = ref(database);
 
-        const createRoomButton = document.getElementById('create-room');
-        const joinRoomButton = document.getElementById('join-room');
-        const roomCodeInput = document.getElementById('room-code');
-        const localVideo = document.getElementById('local-video');
-        const videoContainer = document.getElementById('video-container');
-        let localStream;
-        let peerConnections = {};
+      // WebRTC setup
+      const yourVideo = document.getElementById("yourVideo");
+      const friendsVideo = document.getElementById("friendsVideo");
+      const yourId = Math.floor(Math.random() * 1000000000);
 
-        async function startLocalStream() {
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                localVideo.srcObject = localStream;
-            } catch (error) {
-                console.error('Error accessing media devices:', error);
-                alert('Unable to access camera and microphone.');
-            }
+      const servers = {
+        iceServers: [
+          { urls: "stun:stun.services.mozilla.com" },
+          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: "turn:numb.viagenie.ca",
+            credential: "beaver",
+            username: "webrtc.websitebeaver@gmail.com",
+          },
+        ],
+      };
+
+      const pc = new RTCPeerConnection(servers);
+      pc.onicecandidate = (event) =>
+        event.candidate
+          ? sendMessage(yourId, JSON.stringify({ ice: event.candidate }))
+          : console.log("Sent All Ice");
+      pc.ontrack = (event) => (friendsVideo.srcObject = event.streams[0]);
+
+      function sendMessage(senderId, data) {
+        const msg = push(dbRef, { sender: senderId, message: data });
+        remove(msg); // Clean up the message after sending
+      }
+
+      onChildAdded(dbRef, (data) => {
+        const msg = JSON.parse(data.val().message);
+        const sender = data.val().sender;
+        if (sender !== yourId) {
+          if (msg.ice !== undefined) {
+            pc.addIceCandidate(new RTCIceCandidate(msg.ice));
+          } else if (msg.sdp?.type === "offer") {
+            pc.setRemoteDescription(new RTCSessionDescription(msg.sdp))
+              .then(() => pc.createAnswer())
+              .then((answer) => pc.setLocalDescription(answer))
+              .then(() =>
+                sendMessage(yourId, JSON.stringify({ sdp: pc.localDescription }))
+              );
+          } else if (msg.sdp?.type === "answer") {
+            pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+          }
         }
+      });
 
-        createRoomButton.addEventListener('click', () => {
-            const roomRef = push(ref(db, 'rooms'));
-            const roomId = roomRef.key;
-            roomCodeInput.value = roomId; // Display the room code
-            set(roomRef, { createdAt: Date.now() });
-            alert(`Room created! Room Code: ${roomId}`);
-        });
+      function showMyFace() {
+        navigator.mediaDevices
+          .getUserMedia({ audio: true, video: true })
+          .then((stream) => {
+            yourVideo.srcObject = stream;
+            stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+          });
+      }
 
-        joinRoomButton.addEventListener('click', async () => {
-            const roomId = roomCodeInput.value.trim();
-            if (!roomId) {
-                alert('Please enter a valid room code.');
-                return;
-            }
-
-            const roomRef = ref(db, `rooms/${roomId}`);
-            onValue(roomRef, (snapshot) => {
-                if (!snapshot.exists()) {
-                    alert('Room does not exist!');
-                    return;
-                }
-                console.log('Connected to room:', roomId);
-                startCall(roomId);
-            });
-        });
-
-        function startCall(roomId) {
-            const roomRef = ref(db, `rooms/${roomId}`);
-            const localPeer = new RTCPeerConnection();
-
-            localStream.getTracks().forEach((track) => {
-                localPeer.addTrack(track, localStream);
-            });
-
-            localPeer.ontrack = (event) => {
-                const [remoteStream] = event.streams;
-                addRemoteVideo(remoteStream);
-            };
-
-            localPeer.onicecandidate = (event) => {
-                if (event.candidate) {
-                    push(ref(db, `rooms/${roomId}/iceCandidates`), event.candidate);
-                }
-            };
-
-            peerConnections[roomId] = localPeer;
-
-            // Listen for ICE candidates from Firebase
-            onValue(ref(db, `rooms/${roomId}/iceCandidates`), (snapshot) => {
-                snapshot.forEach((childSnapshot) => {
-                    const candidate = new RTCIceCandidate(childSnapshot.val());
-                    localPeer.addIceCandidate(candidate).catch(console.error);
-                });
-            });
-        }
-
-        function addRemoteVideo(remoteStream) {
-            const remoteVideo = document.createElement('video');
-            remoteVideo.autoplay = true;
-            remoteVideo.playsinline = true;
-            remoteVideo.srcObject = remoteStream;
-            videoContainer.appendChild(remoteVideo);
-        }
-
-        startLocalStream();
+      function showFriendsFace() {
+        pc.createOffer()
+          .then((offer) => pc.setLocalDescription(offer))
+          .then(() =>
+            sendMessage(yourId, JSON.stringify({ sdp: pc.localDescription }))
+          );
+      }
     </script>
-</body>
+  </body>
 </html>
