@@ -33,22 +33,42 @@
       button {
         margin: 5px;
       }
+      input {
+        text-align: center;
+        margin: 10px;
+        padding: 5px;
+        font-size: 16px;
+      }
     </style>
   </head>
-  <body onload="showMyFace()">
+  <body>
     <header>
       <h1>Cactus Call</h1>
       <p>A simple WebRTC video call app powered by Firebase</p>
     </header>
+
+    <div>
+      <input
+        type="text"
+        id="roomCodeInput"
+        placeholder="Enter 4-digit Room Code"
+        maxlength="4"
+      />
+      <button onclick="joinRoom()" class="btn btn-success">Join Room</button>
+    </div>
+
     <div id="videos">
       <video id="yourVideo" autoplay muted playsinline></video>
       <video id="friendsVideo" autoplay playsinline></video>
     </div>
+
     <div class="controls">
       <button
         onclick="showFriendsFace()"
         type="button"
         class="btn btn-primary btn-lg"
+        disabled
+        id="callButton"
       >
         <span
           class="glyphicon glyphicon-facetime-video"
@@ -60,15 +80,17 @@
         onclick="endCall()"
         type="button"
         class="btn btn-danger btn-lg"
+        id="endCallButton"
+        disabled
       >
         <span class="glyphicon glyphicon-phone-alt" aria-hidden="true"></span>
         End Call
       </button>
     </div>
+
     <script type="module">
-      // Import the functions you need from Firebase SDKs
       import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
-      import { getDatabase, ref, push, onChildAdded, remove } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
+      import { getDatabase, ref, push, onChildAdded, remove, child } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-database.js";
 
       // Firebase configuration
       const firebaseConfig = {
@@ -84,13 +106,14 @@
       // Initialize Firebase
       const app = initializeApp(firebaseConfig);
       const database = getDatabase(app);
-      const dbRef = ref(database);
-
-      // WebRTC setup
+      let dbRef;
       const yourVideo = document.getElementById("yourVideo");
       const friendsVideo = document.getElementById("friendsVideo");
-      const yourId = Math.floor(Math.random() * 1000000000);
+      const roomCodeInput = document.getElementById("roomCodeInput");
+      const callButton = document.getElementById("callButton");
+      const endCallButton = document.getElementById("endCallButton");
 
+      const yourId = Math.floor(Math.random() * 1000000000);
       const servers = {
         iceServers: [
           { urls: "stun:stun.services.mozilla.com" },
@@ -102,7 +125,6 @@
           },
         ],
       };
-
       const pc = new RTCPeerConnection(servers);
       pc.onicecandidate = (event) =>
         event.candidate
@@ -115,24 +137,37 @@
         remove(msg); // Clean up the message after sending
       }
 
-      onChildAdded(dbRef, (data) => {
-        const msg = JSON.parse(data.val().message);
-        const sender = data.val().sender;
-        if (sender !== yourId) {
-          if (msg.ice !== undefined) {
-            pc.addIceCandidate(new RTCIceCandidate(msg.ice));
-          } else if (msg.sdp?.type === "offer") {
-            pc.setRemoteDescription(new RTCSessionDescription(msg.sdp))
-              .then(() => pc.createAnswer())
-              .then((answer) => pc.setLocalDescription(answer))
-              .then(() =>
-                sendMessage(yourId, JSON.stringify({ sdp: pc.localDescription }))
-              );
-          } else if (msg.sdp?.type === "answer") {
-            pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-          }
+      function joinRoom() {
+        const roomCode = roomCodeInput.value.trim();
+        if (roomCode.length === 4 && !isNaN(roomCode)) {
+          dbRef = ref(database, `rooms/${roomCode}`);
+          onChildAdded(dbRef, (data) => {
+            const msg = JSON.parse(data.val().message);
+            const sender = data.val().sender;
+            if (sender !== yourId) {
+              if (msg.ice !== undefined) {
+                pc.addIceCandidate(new RTCIceCandidate(msg.ice));
+              } else if (msg.sdp?.type === "offer") {
+                pc.setRemoteDescription(new RTCSessionDescription(msg.sdp))
+                  .then(() => pc.createAnswer())
+                  .then((answer) => pc.setLocalDescription(answer))
+                  .then(() =>
+                    sendMessage(
+                      yourId,
+                      JSON.stringify({ sdp: pc.localDescription })
+                    )
+                  );
+              } else if (msg.sdp?.type === "answer") {
+                pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+              }
+            }
+          });
+          alert(`Joined Room: ${roomCode}`);
+          callButton.disabled = false;
+        } else {
+          alert("Please enter a valid 4-digit room code.");
         }
-      });
+      }
 
       function showMyFace() {
         navigator.mediaDevices
@@ -140,6 +175,10 @@
           .then((stream) => {
             yourVideo.srcObject = stream;
             stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+          })
+          .catch((error) => {
+            console.error("Error accessing media devices.", error);
+            alert("Unable to access camera or microphone.");
           });
       }
 
@@ -149,13 +188,19 @@
           .then(() =>
             sendMessage(yourId, JSON.stringify({ sdp: pc.localDescription }))
           );
+        endCallButton.disabled = false;
       }
 
       function endCall() {
         pc.close();
         friendsVideo.srcObject = null;
         alert("Call ended.");
+        callButton.disabled = true;
+        endCallButton.disabled = true;
       }
+
+      // Start camera and microphone on page load
+      showMyFace();
     </script>
   </body>
 </html>
